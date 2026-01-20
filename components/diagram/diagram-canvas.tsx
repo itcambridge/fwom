@@ -2,14 +2,26 @@
 
 import React from "react"
 
-import { useReducer, useRef, useState, useCallback, useEffect } from "react"
+import { useReducer, useRef, useState, useCallback, useEffect, useMemo } from "react"
 import { DiagramNode } from "./diagram-node"
 import { DiagramConnection } from "./diagram-connection"
 import { DiagramToolbar } from "./diagram-toolbar"
 import { NodeEditorPanel } from "./node-editor-panel"
 import { diagramReducer, initialState } from "@/lib/diagram-reducer"
-import type { NodeColor, DiagramNode as DiagramNodeType } from "@/lib/diagram-types"
+import type { DiagramSnapshot, NodeColor } from "@/lib/diagram-types"
 import { cn } from "@/lib/utils"
+import { useAutosave } from "@/hooks/use-autosave"
+import {
+  createProject,
+  deleteProject,
+  duplicateProject,
+  getLastActiveProjectId,
+  getProject,
+  listProjects,
+  renameProject,
+  setLastActiveProjectId,
+  type ProjectMeta,
+} from "@/lib/projects-store"
 
 const SAMPLE_DIAGRAM = {
   nodes: [
@@ -34,15 +46,128 @@ export function DiagramCanvas() {
   const [state, dispatch] = useReducer(diagramReducer, initialState)
   const [selectedColor, setSelectedColor] = useState<NodeColor>("blue")
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
+  const [projects, setProjects] = useState<ProjectMeta[]>([])
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const isPanning = useRef(false)
   const lastPanPosition = useRef({ x: 0, y: 0 })
 
-  // Load sample diagram on mount
-  useEffect(() => {
-    dispatch({ type: "LOAD_DIAGRAM", payload: SAMPLE_DIAGRAM })
+  const snapshot = useMemo<DiagramSnapshot>(
+    () => ({ nodes: state.nodes, connections: state.connections }),
+    [state.nodes, state.connections]
+  )
+
+  useAutosave(activeProjectId, snapshot)
+
+  const activateProject = useCallback((projectId: string) => {
+    const project = getProject(projectId)
+    if (!project) {
+      return
+    }
+    setActiveProjectId(projectId)
+    setLastActiveProjectId(projectId)
+    dispatch({ type: "LOAD_DIAGRAM", payload: project.snapshot })
   }, [])
+
+  const refreshProjects = useCallback(() => {
+    setProjects(listProjects())
+  }, [])
+
+  // Load last active project on mount (or create the first one)
+  useEffect(() => {
+    try {
+      const existingProjects = listProjects()
+      if (existingProjects.length === 0) {
+        const created = createProject("Untitled", SAMPLE_DIAGRAM)
+        setProjects([created])
+        activateProject(created.id)
+        return
+      }
+
+      setProjects(existingProjects)
+      const lastActiveId = getLastActiveProjectId() ?? existingProjects[0]?.id
+      if (lastActiveId) {
+        activateProject(lastActiveId)
+      }
+    } catch (error) {
+      console.error("Failed to load projects", error)
+    }
+  }, [activateProject])
+
+  const handleProjectSelect = useCallback(
+    (projectId: string) => {
+      try {
+        activateProject(projectId)
+      } catch (error) {
+        console.error("Failed to switch projects", error)
+      }
+    },
+    [activateProject]
+  )
+
+  const handleProjectNew = useCallback(() => {
+    try {
+      const created = createProject("Untitled", { nodes: [], connections: [] })
+      refreshProjects()
+      activateProject(created.id)
+    } catch (error) {
+      console.error("Failed to create project", error)
+    }
+  }, [activateProject, refreshProjects])
+
+  const handleProjectRename = useCallback(
+    (name: string) => {
+      if (!activeProjectId) {
+        return
+      }
+      try {
+        renameProject(activeProjectId, name)
+        refreshProjects()
+      } catch (error) {
+        console.error("Failed to rename project", error)
+      }
+    },
+    [activeProjectId, refreshProjects]
+  )
+
+  const handleProjectDuplicate = useCallback(() => {
+    if (!activeProjectId) {
+      return
+    }
+    try {
+      const created = duplicateProject(activeProjectId)
+      refreshProjects()
+      activateProject(created.id)
+    } catch (error) {
+      console.error("Failed to duplicate project", error)
+    }
+  }, [activeProjectId, activateProject, refreshProjects])
+
+  const handleProjectDelete = useCallback(() => {
+    if (!activeProjectId) {
+      return
+    }
+    const confirmDelete = window.confirm("Delete this project? This cannot be undone.")
+    if (!confirmDelete) {
+      return
+    }
+    try {
+      deleteProject(activeProjectId)
+      const updated = listProjects()
+      setProjects(updated)
+      const nextProjectId = getLastActiveProjectId() ?? updated[0]?.id ?? null
+      if (nextProjectId) {
+        activateProject(nextProjectId)
+        return
+      }
+      const created = createProject("Untitled", { nodes: [], connections: [] })
+      setProjects([created])
+      activateProject(created.id)
+    } catch (error) {
+      console.error("Failed to delete project", error)
+    }
+  }, [activeProjectId, activateProject])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -240,6 +365,16 @@ export function DiagramCanvas() {
         onResetView={handleResetView}
         onExport={handleExport}
         onImport={handleImport}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        activeProjectName={
+          projects.find((project) => project.id === activeProjectId)?.name ?? "Untitled"
+        }
+        onProjectSelect={handleProjectSelect}
+        onProjectNew={handleProjectNew}
+        onProjectRename={handleProjectRename}
+        onProjectDuplicate={handleProjectDuplicate}
+        onProjectDelete={handleProjectDelete}
       />
 
       {/* Canvas */}
@@ -266,7 +401,7 @@ export function DiagramCanvas() {
           {/* SVG for connections */}
           <svg
             ref={svgRef}
-            className="absolute top-0 left-0 w-[5000px] h-[5000px] pointer-events-none"
+            className="absolute top-0 left-0 w-[5000px] h-[5000px]"
             style={{ overflow: "visible" }}
           >
             {/* Render connections */}

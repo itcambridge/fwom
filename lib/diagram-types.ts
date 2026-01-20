@@ -30,6 +30,8 @@ export interface DiagramState {
   panOffset: { x: number; y: number }
 }
 
+export type DiagramSnapshot = Pick<DiagramState, "nodes" | "connections">
+
 export type DiagramAction =
   | { type: "ADD_NODE"; payload: Omit<DiagramNode, "id"> }
   | { type: "UPDATE_NODE"; payload: { id: string; updates: Partial<DiagramNode> } }
