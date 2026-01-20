@@ -36,10 +36,14 @@ export function DiagramConnection({
     }
   }, [isEditing])
 
-  // Calculate line points
-  const x1 = fromNode.x
+  const fallbackWidth = 140
+  const fromWidth = fromNode.width ?? fallbackWidth
+  const toWidth = toNode.width ?? fallbackWidth
+
+  // Calculate line points (connect from right dot to left dot)
+  const x1 = fromNode.x + fromWidth / 2
   const y1 = fromNode.y
-  const x2 = toNode.x
+  const x2 = toNode.x - toWidth / 2
   const y2 = toNode.y
 
   // Calculate control points for curved line

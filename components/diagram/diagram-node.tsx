@@ -62,6 +62,27 @@ export function DiagramNode({
     }
   }, [isEditing])
 
+  useEffect(() => {
+    const element = nodeRef.current
+    if (!element || typeof ResizeObserver === "undefined") {
+      return
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) {
+        return
+      }
+      const { width, height } = entry.contentRect
+      if (width !== node.width || height !== node.height) {
+        onUpdate({ width, height })
+      }
+    })
+
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [node.width, node.height, onUpdate])
+
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
     setIsEditing(true)
